@@ -174,3 +174,4 @@ def test_generate_all_reports(test_setup):
     assert "lead_rows_total" in dq
     assert "rejections_by_reason" in dq
     assert "orphan_events" in dq
+
