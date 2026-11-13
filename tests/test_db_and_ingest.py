@@ -148,3 +148,4 @@ class TestIngestionWorkflow:
         assert cur.fetchone()["c"] == 0
         cur.execute("SELECT COUNT(*) AS c FROM events WHERE lead_id IS NOT NULL")
         assert cur.fetchone()["c"] == 2
+

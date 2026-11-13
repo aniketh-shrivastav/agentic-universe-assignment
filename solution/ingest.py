@@ -388,3 +388,4 @@ def ingest_drop(
                 continue
             process_event_file(jsonl_file, registry, db)
             db.record_ingested_file(file_key, "events", None, jsonl_file.stem)
+
