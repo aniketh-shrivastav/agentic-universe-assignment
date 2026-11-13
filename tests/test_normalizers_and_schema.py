@@ -9,6 +9,7 @@ from solution.normalizers import (
     normalize_enum,
     normalize_string,
     validate_and_normalize_field,
+    validate_lead_row,
 )
 from solution.schema_loader import FieldDef
 
@@ -139,3 +140,81 @@ class TestEnumNormalization:
         assert normalize_enum("fr", allowed) is None
         assert normalize_enum("", allowed) is None
         assert normalize_enum(None, allowed) is None
+
+
+class TestRowValidation:
+    @pytest.fixture
+    def schema(self):
+        reg = SchemaRegistry(SCHEMA_DIR)
+        return reg.get_schema("motor_renewal")
+
+    def test_valid_row(self, schema):
+        raw = {
+            "customer_name": "Aarav Sharma",
+            "phone": "9876543210",
+            "policy_number": "POL-12345",
+            "policy_expiry": "01-Dec-2026",
+            "premium_amount": "₹ 15,000.50",
+            "preferred_language": "HI",
+        }
+        clean, reason, warnings = validate_lead_row(raw, schema)
+        assert reason is None
+        assert warnings == 0
+        assert clean["customer_name"] == "Aarav Sharma"
+        assert clean["phone"] == "+919876543210"
+        assert clean["policy_number"] == "POL-12345"
+        assert clean["policy_expiry"] == "2026-12-01"
+        assert clean["premium_amount"] == 15000.50
+        assert clean["preferred_language"] == "hi"
+
+    def test_missing_required_field(self, schema):
+        raw = {
+            "customer_name": "",  # missing required
+            "phone": "9876543210",
+            "policy_number": "POL-12345",
+        }
+        clean, reason, warnings = validate_lead_row(raw, schema)
+        assert clean is None
+        assert reason == "missing_required:customer_name"
+        assert warnings == 0
+
+    def test_invalid_phone(self, schema):
+        raw = {
+            "customer_name": "Aarav Sharma",
+            "phone": "12345",  # invalid
+            "policy_number": "POL-12345",
+        }
+        clean, reason, warnings = validate_lead_row(raw, schema)
+        assert clean is None
+        assert reason == "invalid_phone"
+        assert warnings == 0
+
+    def test_schema_order_precedence(self, schema):
+        # Both customer_name is missing and phone is invalid.
+        # customer_name is first in schema order, so missing_required:customer_name must win.
+        raw = {
+            "customer_name": "",
+            "phone": "12345",
+            "policy_number": "POL-12345",
+        }
+        clean, reason, warnings = validate_lead_row(raw, schema)
+        assert clean is None
+        assert reason == "missing_required:customer_name"
+
+    def test_optional_invalid_generates_warning(self, schema):
+        raw = {
+            "customer_name": "Aarav Sharma",
+            "phone": "9876543210",
+            "policy_number": "POL-12345",
+            "policy_expiry": "31/02/2026",  # impossible date -> null + warning
+            "premium_amount": "-500",       # negative -> null + warning
+            "preferred_language": "french", # invalid enum -> null + warning
+        }
+        clean, reason, warnings = validate_lead_row(raw, schema)
+        assert reason is None
+        assert warnings == 3
+        assert clean["policy_expiry"] is None
+        assert clean["premium_amount"] is None
+        assert clean["preferred_language"] is None
+
+

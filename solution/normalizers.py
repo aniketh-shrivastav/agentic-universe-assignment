@@ -61,7 +61,6 @@ def normalize_date(raw: str) -> Optional[str]:
 
     for fmt in formats:
         try:
-            # For %d-%b-%Y, title-case to support case-insensitive month names like '01-dec-2026' or '01-DEC-2026'
             target_str = s.title() if "%b" in fmt else s
             dt = datetime.strptime(target_str, fmt)
             return dt.strftime("%Y-%m-%d")
@@ -81,16 +80,13 @@ def normalize_decimal(raw: str) -> Optional[float]:
     if not s:
         return None
 
-    # Remove optional currency prefix: ₹, Rs, Rs., INR (case-insensitive)
     s_clean = re.sub(r"^(?:₹|rs\.?|inr)\s*", "", s, flags=re.IGNORECASE).strip()
-    # Remove thousands separator commas
     s_clean = s_clean.replace(",", "")
 
     try:
         dec = Decimal(s_clean)
         if dec < Decimal("0"):
             return None
-        # Round to 2 decimal places using standard half-up
         rounded = dec.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return float(rounded)
     except (InvalidOperation, ValueError):
@@ -157,5 +153,48 @@ def validate_and_normalize_field(
         res = normalize_enum(val_str, field_def.values)
         return res, (res is not None)
     else:
-        # Fallback to string
         return normalize_string(val_str), True
+
+
+def validate_lead_row(
+    raw_row: Dict[str, Any],
+    schema: SchemaDef,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], int]:
+    """
+    Walks schema fields in schema order.
+    Returns:
+        (clean_fields_dict, rejection_reason, field_warnings_count)
+    If rejected:
+        clean_fields_dict is None, rejection_reason is set, field_warnings_count is 0.
+    If valid:
+        clean_fields_dict has field values (None for nulls), rejection_reason is None, field_warnings_count >= 0.
+    """
+    clean_values: Dict[str, Any] = {}
+    warnings = 0
+
+    for f in schema.fields:
+        raw_val = raw_row.get(f.name)
+        val_str = str(raw_val).strip() if raw_val is not None else ""
+        is_empty = (val_str == "")
+
+        if is_empty:
+            if f.required:
+                # First failure becomes the row's single reason
+                return None, f"missing_required:{f.name}", 0
+            else:
+                clean_values[f.name] = None
+        else:
+            norm_val, is_valid = validate_and_normalize_field(val_str, f)
+            if not is_valid:
+                if f.type == "phone":
+                    return None, "invalid_phone", 0
+                elif f.required:
+                    return None, f"missing_required:{f.name}", 0
+                else:
+                    # Optional field present but invalid -> store null and count one field warning
+                    clean_values[f.name] = None
+                    warnings += 1
+            else:
+                clean_values[f.name] = norm_val
+
+    return clean_values, None, warnings

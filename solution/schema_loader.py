@@ -127,3 +127,4 @@ class SchemaRegistry:
 
     def get_disposition(self, workflow_id: str, code: str) -> Optional[DispositionDef]:
         return self.dispositions.get(workflow_id, {}).get(code)
+
